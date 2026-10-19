@@ -21,8 +21,8 @@ API_HOSTS = {
 }
 # Accounting API minor version sent with every request.
 MINOR_VERSION = "75"
-DEFAULT_PAGE_SIZE = 100
-MAX_PAGE_SIZE = 1000
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
 
 
 class Settings(BaseSettings):

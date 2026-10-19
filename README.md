@@ -43,7 +43,7 @@ Generic actions, per area:
 
 | Action | What it does | Parameters (required in **bold**) |
 |---|---|---|
-| `_list` | Query records, one page | startPosition (from 1), maxResults (default 100, max 1000); transaction areas also startDate, endDate (YYYY-MM-DD, on TxnDate) |
+| `_list` | Query records, one page | startPosition (from 1), maxResults (default 50, max 200); transaction areas also startDate, endDate (YYYY-MM-DD, on TxnDate) |
 | `_get` | One record by id | **`<record>Id`** |
 | `_search` | Records whose name / number contains a term | **term**, startPosition, maxResults |
 | `_create` | Create a record (**write**) | the area's required fields plus optional ones |

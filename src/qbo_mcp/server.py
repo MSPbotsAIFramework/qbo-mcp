@@ -61,8 +61,8 @@ INSTRUCTIONS = (
     '- Records reference each other with {"value": "<id>"} objects, e.g. '
     "CustomerRef, VendorRef, ItemRef, AccountRef. Find ids with *_search or "
     "*_list first.\n"
-    "- Lists page with startPosition (from 1) and maxResults (default 100, max "
-    "1000); transaction lists take startDate / endDate (YYYY-MM-DD).\n"
+    "- Lists page with startPosition (from 1) and maxResults (default 50, max "
+    "200); transaction lists take startDate / endDate (YYYY-MM-DD).\n"
     "- Updates are sparse but need the record's current SyncToken: call *_get "
     "first. Sending Line replaces all lines.\n"
     "- Reports (qbo_reports_*) return QuickBooks report JSON for a date range.\n"

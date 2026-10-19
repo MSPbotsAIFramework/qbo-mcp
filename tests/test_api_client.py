@@ -183,7 +183,7 @@ async def test_search_escapes_quotes_with_backslash(monkeypatch):
     result = await _call(monkeypatch, rec, "qbo_customers_search", {"term": "O'Brien"})
     assert (
         sql_of(rec.requests[0])
-        == "SELECT * FROM Customer WHERE DisplayName LIKE '%O\\'Brien%' STARTPOSITION 1 MAXRESULTS 100"
+        == "SELECT * FROM Customer WHERE DisplayName LIKE '%O\\'Brien%' STARTPOSITION 1 MAXRESULTS 50"
     )
     assert result["items"] == [] and result["has_more"] is False
 
@@ -260,7 +260,7 @@ async def test_invoice_list_status(monkeypatch, status, expected):
     await _call(monkeypatch, rec, "qbo_invoices_list", {"status": status})
     assert (
         sql_of(rec.requests[0])
-        == f"SELECT * FROM Invoice WHERE {expected} ORDERBY TxnDate DESC STARTPOSITION 1 MAXRESULTS 100"
+        == f"SELECT * FROM Invoice WHERE {expected} ORDERBY TxnDate DESC STARTPOSITION 1 MAXRESULTS 50"
     )
 
 
@@ -334,7 +334,7 @@ async def test_expenses(monkeypatch):
     await _call(monkeypatch, rec, "qbo_expenses_list_purchases", {"startDate": "2026-02-01"})
     assert (
         sql_of(rec.calls("query")[0])
-        == "SELECT * FROM Purchase WHERE TxnDate >= '2026-02-01' ORDERBY TxnDate DESC STARTPOSITION 1 MAXRESULTS 100"
+        == "SELECT * FROM Purchase WHERE TxnDate >= '2026-02-01' ORDERBY TxnDate DESC STARTPOSITION 1 MAXRESULTS 50"
     )
     assert await _call(monkeypatch, rec, "qbo_expenses_get_purchase", {"purchaseId": "4"}) == {"Id": "4"}
 
