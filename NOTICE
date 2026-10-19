@@ -1,0 +1,9 @@
+QuickBooks Online MCP Server
+Copyright 2026 MSPbots.ai
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+"QuickBooks" and "Intuit" are trademarks of their respective owner. This
+project is an independent integration that calls the documented QuickBooks
+Online Accounting API; it contains no Intuit source code and is not affiliated
+with or endorsed by Intuit.
