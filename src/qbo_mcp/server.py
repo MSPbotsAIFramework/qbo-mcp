@@ -90,7 +90,9 @@ def _clean(value: str | None) -> str | None:
 class GatewayCredentialsMiddleware:
     """Reads the QuickBooks headers on /mcp requests into the request context.
 
-    Needs X-Qbo-Access-Token and X-Qbo-Realm-Id; otherwise 401.
+    Needs X-Qbo-Access-Token and X-Qbo-Realm-Id; otherwise 401. A malformed realm id or
+    environment does not block the request (tools/list must work with any values);
+    tools report it instead.
     """
 
     def __init__(self, app: ASGIApp):
@@ -127,11 +129,14 @@ class GatewayCredentialsMiddleware:
         elif environment is None:
             problem = f"{HEADER_ENVIRONMENT} must be production or sandbox"
         if problem:
-            await JSONResponse({"error": "Invalid header", "message": problem}, status_code=400)(scope, receive, send)
-            return
+            # Safe stand-ins; tools return header_error before any API call.
+            realm = realm if _REALM.match(realm or "") else "0"
 
         credentials = QboCredentials(
-            access_token=token or "", realm_id=realm or "", environment=environment or "production"
+            access_token=token or "",
+            realm_id=realm or "",
+            environment=environment or "production",
+            header_error=problem,
         )
         request_id = (request.headers.get("x-request-id") or "").strip()[:64] or uuid.uuid4().hex[:12]
         creds_token = _credentials_var.set(credentials)

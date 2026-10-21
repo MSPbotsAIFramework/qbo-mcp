@@ -32,8 +32,9 @@ How they are sent to QuickBooks: the token as `Authorization: Bearer <token>` to
 `minorversion=75` on every call. Values that look like unresolved templates (`${...}`) are
 treated as missing.
 
-A request to `/mcp` without the required headers gets HTTP 401 naming them; a non-numeric realm
-id or an unknown environment gets HTTP 400.
+A request to `/mcp` without the required headers gets HTTP 401 naming them. A non-numeric realm
+id or an unknown environment does not block `tools/list`; tools then return an
+`invalid_argument` error describing the bad header.
 
 ## Tools
 

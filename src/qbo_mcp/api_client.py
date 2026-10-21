@@ -103,6 +103,9 @@ class QboCredentials:
     access_token: str
     realm_id: str
     environment: Environment = "production"
+    # Set when a header value is malformed: tools then return invalid_argument
+    # instead of calling QuickBooks, while tools/list still works.
+    header_error: str | None = None
 
     def __repr__(self) -> str:  # never leak the token into logs or tracebacks
         return f"QboCredentials(realm_id={self.realm_id!r}, environment={self.environment!r}, access_token=<redacted>)"
@@ -114,6 +117,7 @@ class QboClient:
     def __init__(self, credentials: QboCredentials, http_client: httpx.AsyncClient | None = None):
         self._credentials = credentials
         self._http = http_client
+        self.header_error = credentials.header_error
         self.realm_id = credentials.realm_id
         self.environment = credentials.environment
         self.base_url = f"{API_HOSTS[credentials.environment]}/v3/company/{credentials.realm_id}"

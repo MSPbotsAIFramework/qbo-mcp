@@ -164,6 +164,8 @@ async def run_tool(name: str, client_factory: ClientFactory, action: Callable[[Q
     client = client_factory()
     if client is None:
         return NOT_CONFIGURED
+    if client.header_error:
+        return error_envelope("invalid_argument", client.header_error, False)
     started = time.monotonic()
     try:
         result = await action(client)
