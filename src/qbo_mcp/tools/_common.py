@@ -118,6 +118,8 @@ async def run_query(client: QboClient, entity: str, sql: str, start: int | None,
             "maxResults": limit,
             "has_more": more,
             "next_startPosition": first + limit if more else None,
+            # A cut result continues right after the last record returned.
+            "_resume": {"key": "next_startPosition", "start": first},
         }
     )
 

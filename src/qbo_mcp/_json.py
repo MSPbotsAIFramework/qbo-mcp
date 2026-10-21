@@ -130,6 +130,7 @@ _CONTINUATION_KEYS = frozenset(
     {
         "next_page", "next_offset", "next_skip", "next_cursor", "next_page_token", "next_token",
         "starting_after", "next", "next_link", "nextPageAfter", "next_start", "nextPage", "next_page_url",
+        "next_startPosition",
     }
 )
 _RESUME = "_resume"

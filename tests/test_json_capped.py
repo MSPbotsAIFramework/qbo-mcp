@@ -62,3 +62,13 @@ def test_resume_hint_continues_right_after_the_last_record():
 def test_nothing_fits_returns_a_note():
     out = _load(dump_json_capped({"items": [{"id": 1, **{f"f{j}": "v" * 9 for j in range(3000)}}], "next_page": 2}))
     assert out["truncated"] is True and "next_page" not in out
+
+
+
+def test_cut_result_never_keeps_a_skipping_next_startposition():
+    # PRD-20989: a next-page field the size limit does not know would skip the cut records.
+    rows = [{"id": i, "text": "x" * 70, **{f"f{k}": k for k in range(30)}} for i in range(100)]
+    data = {"items": rows, "count": 100, "has_more": True, "next_startPosition": 101, "_resume": {"key": "next_startPosition", "start": 1}}
+    out = json.loads(dump_json_capped(data))
+    assert out["truncated"] is True and out["count"] < 100
+    assert out.get("next_startPosition") == out["count"] + 1
