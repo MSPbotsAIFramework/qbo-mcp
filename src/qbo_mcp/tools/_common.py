@@ -86,8 +86,9 @@ def select(entity: str, conditions: list[str], start: int | None, size: int | No
     sql = f"SELECT * FROM {entity}"
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)
-    if order:
-        sql += f" ORDERBY {order}"
+    # Id last makes the order unique, so pages never repeat or skip a record. Without it
+    # QuickBooks returned one account twice and never another when paging by 3 or 5.
+    sql += f" ORDERBY {order}, Id DESC" if order else " ORDERBY Id"
     return f"{sql} STARTPOSITION {start or 1} MAXRESULTS {size or DEFAULT_PAGE_SIZE}"
 
 

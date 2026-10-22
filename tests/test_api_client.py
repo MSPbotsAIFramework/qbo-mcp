@@ -129,7 +129,7 @@ async def test_http_fault_and_401(monkeypatch):
         }
     )
     missing = await _call(monkeypatch, rec, "qbo_invoices_get", {"invoiceId": "9"})
-    assert missing["error"]["code"] == "invalid_argument" and "Object Not Found" in missing["error"]["message"]
+    assert missing["error"] == {"code": "not_found", "message": "No invoice with id 9.", "retryable": False}
     expired = await _call(monkeypatch, rec, "qbo_status", {})
     assert expired["error"]["code"] == "unauthorized" and "reconnect" in expired["error"]["message"]
 
@@ -159,7 +159,7 @@ async def test_list_with_date_range_and_paging(monkeypatch):
     )
     assert (
         sql_of(rec.requests[0])
-        == "SELECT * FROM Payment WHERE TxnDate >= '2026-01-01' AND TxnDate <= '2026-01-31' STARTPOSITION 11 MAXRESULTS 2"
+        == "SELECT * FROM Payment WHERE TxnDate >= '2026-01-01' AND TxnDate <= '2026-01-31' ORDERBY Id STARTPOSITION 11 MAXRESULTS 2"
     )
     assert result == {
         "items": [{"Id": "1"}, {"Id": "2"}],
@@ -183,7 +183,7 @@ async def test_search_escapes_quotes_with_backslash(monkeypatch):
     result = await _call(monkeypatch, rec, "qbo_customers_search", {"term": "O'Brien"})
     assert (
         sql_of(rec.requests[0])
-        == "SELECT * FROM Customer WHERE DisplayName LIKE '%O\\'Brien%' STARTPOSITION 1 MAXRESULTS 50"
+        == "SELECT * FROM Customer WHERE DisplayName LIKE '%O\\'Brien%' ORDERBY Id STARTPOSITION 1 MAXRESULTS 50"
     )
     assert result["items"] == [] and result["has_more"] is False
 
@@ -260,7 +260,7 @@ async def test_invoice_list_status(monkeypatch, status, expected):
     await _call(monkeypatch, rec, "qbo_invoices_list", {"status": status})
     assert (
         sql_of(rec.requests[0])
-        == f"SELECT * FROM Invoice WHERE {expected} ORDERBY TxnDate DESC STARTPOSITION 1 MAXRESULTS 50"
+        == f"SELECT * FROM Invoice WHERE {expected} ORDERBY TxnDate DESC, Id DESC STARTPOSITION 1 MAXRESULTS 50"
     )
 
 
@@ -334,7 +334,7 @@ async def test_expenses(monkeypatch):
     await _call(monkeypatch, rec, "qbo_expenses_list_purchases", {"startDate": "2026-02-01"})
     assert (
         sql_of(rec.calls("query")[0])
-        == "SELECT * FROM Purchase WHERE TxnDate >= '2026-02-01' ORDERBY TxnDate DESC STARTPOSITION 1 MAXRESULTS 50"
+        == "SELECT * FROM Purchase WHERE TxnDate >= '2026-02-01' ORDERBY TxnDate DESC, Id DESC STARTPOSITION 1 MAXRESULTS 50"
     )
     assert await _call(monkeypatch, rec, "qbo_expenses_get_purchase", {"purchaseId": "4"}) == {"Id": "4"}
 
@@ -365,3 +365,114 @@ async def test_reports(monkeypatch):
         monkeypatch, rec, "qbo_reports_cash_flow", {"start_date": "2026-03-01", "end_date": "2026-01-01"}
     )
     assert reversed_range["error"]["code"] == "invalid_argument"
+
+
+# ---- PRD-21132 / 21133 / 21134: tax code ids, stable paging order, missing ids ----------------------
+
+
+def _fault(code, message="Request has invalid or unsupported property"):
+    return {"Fault": {"Error": [{"Message": message, "code": code}], "type": "ValidationFault"}}
+
+
+@pytest.mark.parametrize("tax_code_id", ["TAX", "NON", "CustomSalesTax", "2"])
+async def test_tax_codes_are_read_with_a_query_for_text_and_numeric_ids(monkeypatch, tax_code_id):
+    rec = Recorder({"POST query": {"QueryResponse": {"TaxCode": [{"Id": tax_code_id, "Name": "Tax"}]}}})
+    result = await _call(monkeypatch, rec, "qbo_tax_codes_get", {"taxCodeId": tax_code_id})
+    assert result == {"Id": tax_code_id, "Name": "Tax"}
+    assert [sql_of(r) for r in rec.requests] == [f"SELECT * FROM TaxCode WHERE Id = '{tax_code_id}'"]
+
+
+async def test_unknown_tax_code_is_not_found(monkeypatch):
+    rec = Recorder({"POST query": {"QueryResponse": {}}})
+    result = await _call(monkeypatch, rec, "qbo_tax_codes_get", {"taxCodeId": "NOPE"})
+    assert result["error"] == {"code": "not_found", "message": "No tax code with id NOPE.", "retryable": False}
+
+
+async def test_missing_id_code_2010_is_not_found(monkeypatch):
+    rec = Recorder({"GET customer/999999": lambda r: httpx.Response(400, json=_fault("2010"))})
+    result = await _call(monkeypatch, rec, "qbo_customers_get", {"customerId": "999999"})
+    assert result["error"] == {"code": "not_found", "message": "No customer with id 999999.", "retryable": False}
+    assert sql_of(rec.calls("query")[0]) == "SELECT * FROM Customer WHERE Id = '999999'"
+
+
+async def test_code_2010_for_a_record_the_query_finds_returns_it(monkeypatch):
+    rec = Recorder(
+        {
+            "GET customer/5": lambda r: httpx.Response(400, json=_fault("2010")),
+            "POST query": {"QueryResponse": {"Customer": [{"Id": "5", "DisplayName": "Ann"}]}},
+        }
+    )
+    assert await _call(monkeypatch, rec, "qbo_customers_get", {"customerId": "5"}) == {"Id": "5", "DisplayName": "Ann"}
+
+
+async def test_malformed_id_stays_invalid_argument(monkeypatch):
+    fault = _fault("2030", "Invalid ID - Id should be a valid number. Supplied value:ABC")
+    rec = Recorder({"GET customer/ABC": lambda r: httpx.Response(400, json=fault)})
+    result = await _call(monkeypatch, rec, "qbo_customers_get", {"customerId": "ABC"})
+    assert result["error"]["code"] == "invalid_argument" and "2030" in result["error"]["message"]
+    assert rec.calls("query") == []
+
+
+async def test_non_numeric_id_with_code_2010_stays_invalid_argument(monkeypatch):
+    # Seen on INT: customer/ABC answers 2010, the same code as a missing numeric id.
+    rec = Recorder({"GET customer/ABC": lambda r: httpx.Response(400, json=_fault("2010"))})
+    result = await _call(monkeypatch, rec, "qbo_customers_get", {"customerId": "ABC"})
+    assert result["error"]["code"] == "invalid_argument" and rec.calls("query") == []
+
+
+async def test_other_errors_on_get_are_not_rewritten(monkeypatch):
+    rec = Recorder({"GET customer/5": lambda r: httpx.Response(400, json=_fault("6000", "Business validation"))})
+    result = await _call(monkeypatch, rec, "qbo_customers_get", {"customerId": "5"})
+    assert result["error"]["code"] == "invalid_argument" and rec.calls("query") == []
+
+
+async def test_code_2010_on_a_write_stays_invalid_argument(monkeypatch):
+    rec = Recorder({"POST customer": lambda r: httpx.Response(400, json=_fault("2010"))})
+    result = await _call(
+        monkeypatch, rec, "qbo_customers_update", {"customerId": "1", "SyncToken": "0", "GivenName": "Ann"}
+    )
+    assert result["error"]["code"] == "invalid_argument" and rec.calls("query") == []
+
+
+async def test_every_list_and_search_query_ends_with_a_unique_sort_key(monkeypatch):
+    tools = await create_mcp_server().list_tools()
+    checked = 0
+    for tool in tools:
+        if not tool.name.endswith(("_list", "_search")) and "_list_" not in tool.name:
+            continue
+        required = set(tool.inputSchema.get("required", []))
+        if required - {"term"}:
+            continue
+        rec = Recorder()
+        await _call(monkeypatch, rec, tool.name, {"term": "a"} if "term" in required else {})
+        queries = [sql_of(r) for r in rec.calls("query")]
+        if not queries:
+            continue
+        order = queries[0].split(" ORDERBY ", 1)[1].split(" STARTPOSITION ")[0]
+        assert order == "Id" or order.endswith(", Id DESC"), (tool.name, queries[0])
+        checked += 1
+    assert checked >= 25
+
+
+@pytest.mark.parametrize("page_size", [3, 5, 7])
+async def test_paging_by_small_pages_returns_every_account_once(monkeypatch, page_size):
+    # Without a unique sort key the fake API returns rows in a different order on each call, like
+    # QuickBooks did for accounts; with ORDERBY Id the pages line up and nothing repeats or is skipped.
+    import random
+
+    accounts = [{"Id": str(i)} for i in range(1, 90)]
+
+    def reply(request):
+        sql = sql_of(request)
+        start = int(sql.split("STARTPOSITION ")[1].split()[0])
+        size = int(sql.split("MAXRESULTS ")[1].split()[0])
+        rows = sorted(accounts, key=lambda a: a["Id"]) if "ORDERBY Id" in sql else random.sample(accounts, len(accounts))
+        return httpx.Response(200, json={"QueryResponse": {"Account": rows[start - 1 : start - 1 + size]}})
+
+    rec = Recorder({"POST query": reply})
+    seen, start = [], 1
+    while start is not None:
+        out = await _call(monkeypatch, rec, "qbo_accounts_list", {"startPosition": start, "maxResults": page_size})
+        seen += [a["Id"] for a in out["items"]]
+        start = out.get("next_startPosition")
+    assert sorted(seen, key=int) == [a["Id"] for a in accounts]

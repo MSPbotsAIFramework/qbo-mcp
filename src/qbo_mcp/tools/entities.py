@@ -18,7 +18,7 @@ from typing import Annotated, Any
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from ..api_client import QboClient
+from ..api_client import QboClient, QboError
 from ._common import (
     DESTRUCTIVE,
     READ_ONLY,
@@ -94,7 +94,17 @@ def _register_entity(mcp: FastMCP, e: Entity, client_factory: ClientFactory) -> 
 
     async def get_handler(client: QboClient, args: dict[str, Any], e: Entity = e) -> Any:
         rid = record_id(args[e.id_param], e.id_param)
-        return unwrap(await client.get(f"{e.path}/{rid}"), e.entity)
+        if e.entity == "TaxCode":
+            # Tax codes can have text ids (TAX, NON, CustomSalesTax), which taxcode/{id} rejects (code 2030).
+            return await _get_by_query(client, e, rid)
+        try:
+            return unwrap(await client.get(f"{e.path}/{rid}"), e.entity)
+        except QboError as error:
+            # A missing id comes back as HTTP 400 code 2010 (or 610), not 404: confirm with a query.
+            # A non-numeric id also gets 2010 for most entities; that stays invalid_argument.
+            if rid.isdigit() and error.status_code == 400 and {"2010", "610"} & set(error.fault_codes):
+                return await _get_by_query(client, e, rid)
+            raise
 
     add_tool(
         mcp,
@@ -192,6 +202,15 @@ def _register_entity(mcp: FastMCP, e: Entity, client_factory: ClientFactory) -> 
             search_handler,
             client_factory,
         )
+
+
+async def _get_by_query(client: QboClient, e: Entity, rid: str) -> Any:
+    payload = await client.query(f"SELECT * FROM {e.entity} WHERE Id = {quote(rid)}") or {}
+    response = payload.get("QueryResponse") if isinstance(payload, dict) else None
+    rows = response.get(e.entity) if isinstance(response, dict) else None
+    if isinstance(rows, list) and rows:
+        return rows[0]
+    raise QboError(404, f"No {e.label} with id {rid}.")
 
 
 def register(mcp: FastMCP, client_factory: ClientFactory) -> None:

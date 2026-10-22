@@ -88,9 +88,10 @@ def classify_status(status_code: int) -> tuple[str, bool]:
 
 
 class QboError(Exception):
-    def __init__(self, status_code: int, message: str):
+    def __init__(self, status_code: int, message: str, fault_codes: tuple[str, ...] = ()):
         self.status_code = status_code
         self.message = message
+        self.fault_codes = fault_codes  # QuickBooks Fault error codes, e.g. ("2010",)
         super().__init__(f"QuickBooks API error {status_code}: {message}")
 
     def to_envelope(self) -> str:
@@ -205,11 +206,11 @@ class QboClient:
                 raise error
             assert resp is not None
             if resp.status_code >= 400:
-                raise QboError(resp.status_code, _error_message(resp, path))
+                raise QboError(resp.status_code, _error_message(resp, path), _fault_codes(_parse_body(resp)))
             payload = _parse_body(resp)
             # A request can succeed at HTTP level and still carry a Fault.
             if isinstance(payload, dict) and isinstance(payload.get("Fault"), dict):
-                raise QboError(400, _fault_text(payload["Fault"], path))
+                raise QboError(400, _fault_text(payload["Fault"], path), _fault_codes(payload))
             return payload
 
 
@@ -231,6 +232,12 @@ def _parse_body(resp: httpx.Response) -> Any:
         return resp.json()
     except ValueError:
         return {"raw_response": resp.text[:2000]}
+
+
+def _fault_codes(payload: Any) -> tuple[str, ...]:
+    fault = payload.get("Fault") if isinstance(payload, dict) else None
+    errors = fault.get("Error") if isinstance(fault, dict) else None
+    return tuple(str(e["code"]) for e in errors or [] if isinstance(e, dict) and e.get("code") is not None)
 
 
 def _fault_text(fault: dict, path: str) -> str:
