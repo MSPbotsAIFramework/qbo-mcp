@@ -96,7 +96,7 @@ def _register_entity(mcp: FastMCP, e: Entity, client_factory: ClientFactory) -> 
         rid = record_id(args[e.id_param], e.id_param)
         if e.entity == "TaxCode":
             # Tax codes can have text ids (TAX, NON, CustomSalesTax), which taxcode/{id} rejects (code 2030).
-            return await _get_by_query(client, e, rid)
+            return await _get_by_query(client, e, rid) if rid.isdigit() else await _find_tax_code(client, e, rid)
         try:
             return unwrap(await client.get(f"{e.path}/{rid}"), e.entity)
         except QboError as error:
@@ -211,6 +211,26 @@ async def _get_by_query(client: QboClient, e: Entity, rid: str) -> Any:
     if isinstance(rows, list) and rows:
         return rows[0]
     raise QboError(404, f"No {e.label} with id {rid}.")
+
+
+async def _find_tax_code(client: QboClient, e: Entity, rid: str) -> Any:
+    # A text id can't be queried either ("WHERE Id = 'TAX'" gets code 2090), so read the
+    # tax codes page by page (a company has few) and match the id.
+    start = 1
+    while True:
+        payload = await client.query(select(e.entity, [], start, _TAX_CODE_PAGE)) or {}
+        response = payload.get("QueryResponse") if isinstance(payload, dict) else None
+        rows = response.get(e.entity) if isinstance(response, dict) else None
+        rows = rows if isinstance(rows, list) else []
+        match = next((r for r in rows if isinstance(r, dict) and str(r.get("Id")) == rid), None)
+        if match is not None:
+            return match
+        if len(rows) < _TAX_CODE_PAGE:
+            raise QboError(404, f"No {e.label} with id {rid}.")
+        start += _TAX_CODE_PAGE
+
+
+_TAX_CODE_PAGE = 1000  # the largest page a QuickBooks query returns
 
 
 def register(mcp: FastMCP, client_factory: ClientFactory) -> None:

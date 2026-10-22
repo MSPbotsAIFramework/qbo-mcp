@@ -374,18 +374,42 @@ def _fault(code, message="Request has invalid or unsupported property"):
     return {"Fault": {"Error": [{"Message": message, "code": code}], "type": "ValidationFault"}}
 
 
-@pytest.mark.parametrize("tax_code_id", ["TAX", "NON", "CustomSalesTax", "2"])
-async def test_tax_codes_are_read_with_a_query_for_text_and_numeric_ids(monkeypatch, tax_code_id):
-    rec = Recorder({"POST query": {"QueryResponse": {"TaxCode": [{"Id": tax_code_id, "Name": "Tax"}]}}})
+@pytest.mark.parametrize("tax_code_id", ["TAX", "NON", "CustomSalesTax"])
+async def test_text_tax_code_ids_are_found_in_the_tax_code_list(monkeypatch, tax_code_id):
+    # Live check: taxcode/TAX gets code 2030 and "WHERE Id = 'TAX'" gets code 2090; the list has them.
+    codes = [{"Id": i, "Name": f"code {i}"} for i in ("2", "3", "CustomSalesTax", "NON", "TAX")]
+    rec = Recorder({"POST query": {"QueryResponse": {"TaxCode": codes}}})
     result = await _call(monkeypatch, rec, "qbo_tax_codes_get", {"taxCodeId": tax_code_id})
-    assert result == {"Id": tax_code_id, "Name": "Tax"}
-    assert [sql_of(r) for r in rec.requests] == [f"SELECT * FROM TaxCode WHERE Id = '{tax_code_id}'"]
+    assert result == {"Id": tax_code_id, "Name": f"code {tax_code_id}"}
+    assert [sql_of(r) for r in rec.requests] == ["SELECT * FROM TaxCode ORDERBY Id STARTPOSITION 1 MAXRESULTS 1000"]
+
+
+async def test_text_tax_code_on_a_later_page_is_found(monkeypatch):
+    def reply(request):
+        first = "STARTPOSITION 1 " in sql_of(request)
+        rows = [{"Id": str(i)} for i in range(1000)] if first else [{"Id": "TAX", "Name": "Tax"}]
+        return httpx.Response(200, json={"QueryResponse": {"TaxCode": rows}})
+
+    rec = Recorder({"POST query": reply})
+    assert await _call(monkeypatch, rec, "qbo_tax_codes_get", {"taxCodeId": "TAX"}) == {"Id": "TAX", "Name": "Tax"}
+    assert "STARTPOSITION 1001 " in sql_of(rec.requests[1]) and len(rec.requests) == 2
+
+
+async def test_numeric_tax_code_id_is_queried_by_id(monkeypatch):
+    rec = Recorder({"POST query": {"QueryResponse": {"TaxCode": [{"Id": "2", "Name": "California"}]}}})
+    assert await _call(monkeypatch, rec, "qbo_tax_codes_get", {"taxCodeId": "2"}) == {"Id": "2", "Name": "California"}
+    assert [sql_of(r) for r in rec.requests] == ["SELECT * FROM TaxCode WHERE Id = '2'"]
 
 
 async def test_unknown_tax_code_is_not_found(monkeypatch):
-    rec = Recorder({"POST query": {"QueryResponse": {}}})
-    result = await _call(monkeypatch, rec, "qbo_tax_codes_get", {"taxCodeId": "NOPE"})
-    assert result["error"] == {"code": "not_found", "message": "No tax code with id NOPE.", "retryable": False}
+    def reply(request):  # the list has only TAX; a query by id finds nothing
+        rows = [] if " WHERE " in sql_of(request) else [{"Id": "TAX"}]
+        return httpx.Response(200, json={"QueryResponse": {"TaxCode": rows}})
+
+    rec = Recorder({"POST query": reply})
+    for tax_code_id in ("NOPE", "999"):
+        result = await _call(monkeypatch, rec, "qbo_tax_codes_get", {"taxCodeId": tax_code_id})
+        assert result["error"] == {"code": "not_found", "message": f"No tax code with id {tax_code_id}.", "retryable": False}
 
 
 async def test_missing_id_code_2010_is_not_found(monkeypatch):
