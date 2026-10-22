@@ -72,3 +72,19 @@ def test_cut_result_never_keeps_a_skipping_next_startposition():
     out = json.loads(dump_json_capped(data))
     assert out["truncated"] is True and out["count"] < 100
     assert out.get("next_startPosition") == out["count"] + 1
+
+
+
+def test_single_oversized_record_is_shortened_not_dropped():
+    # PRD-21055: one record larger than the cap (e.g. a long HTML description) keeps its fields.
+    record = {"id": 7, "subject": "Printer down", "description": "<p>" + "x" * 30_000 + "</p>", "tags": ["a", "b"]}
+    out = json.loads(dump_json_capped(record))
+    assert (out["id"], out["subject"], out["tags"]) == (7, "Printer down", ["a", "b"])
+    assert out["fields_truncated"] is True and out["description"].endswith("...[truncated]")
+    assert len(json.dumps(out)) <= MAX_CHARS
+
+
+def test_record_with_a_small_list_and_a_huge_field_is_shortened():
+    record = {"id": 8, "body": "y" * 50_000, "conversations": [{"id": i, "text": "z" * 100} for i in range(3)]}
+    out = json.loads(dump_json_capped(record))
+    assert out["id"] == 8 and len(out["conversations"]) == 3 and out["fields_truncated"] is True
