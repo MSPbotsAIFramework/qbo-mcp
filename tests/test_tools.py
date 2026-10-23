@@ -17,7 +17,6 @@ import asyncio
 import json
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
 
 from qbo_mcp.api_client import QboError
 from qbo_mcp.server import INSTRUCTIONS, create_mcp_server
@@ -227,8 +226,9 @@ def test_max_results_is_capped_at_200(tools):
     assert len(paged) == 42
     for tool in paged:
         assert tool.inputSchema["properties"]["maxResults"]["anyOf"][0]["maximum"] == 200, tool.name
-    with pytest.raises(ToolError, match="less than or equal to 200"):
-        asyncio.run(create_mcp_server().call_tool("qbo_customers_list", {"maxResults": 201}))
+    content, _ = asyncio.run(create_mcp_server().call_tool("qbo_customers_list", {"maxResults": 201}))
+    error = json.loads(content[0].text)["error"]
+    assert error["code"] == "invalid_argument" and "less than or equal to 200" in error["message"]
 
 
 def test_instructions_budget():
